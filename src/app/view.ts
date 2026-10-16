@@ -1,7 +1,8 @@
-import { needsRestock, type Item, type ItemInput } from "./logic.js";
+import { type Item, type ItemInput } from "./logic.js";
 import { escapeHtml } from "../html.js";
 import { renderDesigner, selectionLink, type DesignerContext } from "../designer/view.js";
 import { type CardField, type ScreenDesign } from "../designer/schema.js";
+import { boundValue, evaluateVisibility, fieldBinding, fieldVisibility } from "../designer/bindings.js";
 
 function inputValue(value: unknown): string {
   return typeof value === "string" ? escapeHtml(value) : "";
@@ -19,20 +20,20 @@ interface InventoryView {
 }
 
 function renderField(field: CardField, item: Item, designer?: DesignerContext): string {
+  if (!evaluateVisibility(fieldVisibility(field), item)) return "";
   let content: string;
   const label = escapeHtml(field.label);
-  if (field.kind === "name") content = `<h2><span class="field-label">${label}</span>${escapeHtml(item.name)}</h2>`;
-  else if (field.kind === "quantity") content = `<p>${label}：<strong>${item.quantity}</strong> 個</p>`;
-  else if (field.kind === "minimumStock") content = `<p>${label}：${item.minimumStock} 個</p>`;
-  else if (field.kind === "restock") {
-    if (!needsRestock(item)) return "";
-    content = `<p class="warning">${label}</p>`;
-  } else content = `<p>${label}</p>`;
+  const value = escapeHtml(boundValue(field, item));
+  if (field.kind === "name") content = `<h2><span class="field-label">${label}</span>${value}</h2>`;
+  else if (field.kind === "quantity") content = `<p>${label}：<strong>${value}</strong> 個</p>`;
+  else if (field.kind === "minimumStock") content = `<p>${label}：${value} 個</p>`;
+  else if (field.kind === "restock") content = `<p class="warning">${label}</p>`;
+  else content = `<p>${label}${fieldBinding(field) === undefined ? "" : `：${value}`}</p>`;
   return designer ? selectionLink(content, field.id, designer) : content;
 }
 
 export function renderInventory(view: InventoryView): string {
-  const designerFields = view.designer ? `<input type="hidden" name="designer" value="1"><input type="hidden" name="selected" value="${escapeHtml(view.designer.selected)}">` : "";
+  const designerFields = view.designer ? `<input type="hidden" name="designer" value="1"><input type="hidden" name="selected" value="${escapeHtml(view.designer.selected)}">${view.designer.inspector?.sampleId ? `<input type="hidden" name="sample" value="${escapeHtml(view.designer.inspector.sampleId)}">` : ""}` : "";
   const filter = `<input type="hidden" name="lowStock" value="${view.onlyLowStock ? "1" : "0"}">${designerFields}`;
   const draft = view.draft ?? { name: "", quantity: "1", minimumStock: "1" };
   const layout = view.design.layout;
@@ -104,7 +105,7 @@ export function renderPage(workspace: string, title = "備品管理"): string {
       body { display: grid; justify-items: center; margin: 0; padding: 2rem 1rem; font-family: system-ui, sans-serif; color: #182230; background: #f5f7fa; }
       main { display: grid; gap: 1rem; width: 100%; max-width: 64rem; }
       #inventory { display: grid; gap: 1rem; }
-      h1, h2, h3, p { margin: 0; }
+      h1, h2, h3, h4, p { margin: 0; }
       h2 { font-size: 1.15rem; overflow-wrap: anywhere; }
       header { display: grid; gap: 0.5rem; }
       .add-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr)); gap: 0.75rem; align-items: end; }
@@ -124,6 +125,11 @@ export function renderPage(workspace: string, title = "備品管理"): string {
       .designer { padding: 1rem; border: 1px solid #ccd3db; background: white; }
       .design-select { display: grid; gap: 0.25rem; padding: 0.25rem; border: 1px dashed #667085; color: inherit; text-decoration: none; overflow-wrap: anywhere; }
       .design-select.selected { outline: 2px solid #175cd3; background: #eff8ff; }
+      .data-inspector, .inspector-values, .inspector-rule { display: grid; gap: 0.5rem; min-width: 0; }
+      .data-inspector { border-top: 1px solid #ccd3db; padding-top: 1rem; }
+      .inspector-values, .inspector-values dd { margin: 0; }
+      .inspector-row { display: grid; gap: 0.25rem; padding: 0.5rem; border: 1px solid #ccd3db; overflow-wrap: anywhere; }
+      .inspector-rule { overflow-wrap: anywhere; }
       @media (max-width: 800px) { .designer-shell { grid-template-columns: minmax(0, 1fr); } }
     </style>
   </head>

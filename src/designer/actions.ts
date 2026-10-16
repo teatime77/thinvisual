@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
-  DesignError, fieldLabels, isFieldKind, readLabel, validateDesign, type ScreenDesign,
+  DesignError, fieldLabels, isFieldKind, readBinding, readLabel, readVisibility, validateDesign, type ScreenDesign,
 } from "./schema.js";
 
 export function updateDesign(design: ScreenDesign, input: Record<string, unknown>): { design: ScreenDesign; selected: string } {
@@ -27,7 +27,15 @@ export function updateDesign(design: ScreenDesign, input: Record<string, unknown
       throw new DesignError("配置を選んでください。");
     }
   } else if (index >= 0) {
-    if (input.action === "update") next.fields[index].label = readLabel(input.label);
+    if (input.action === "update") {
+      const field = next.fields[index];
+      field.label = readLabel(input.label);
+      if (Object.hasOwn(input, "binding")) {
+        if (input.binding === "") delete field.binding;
+        else field.binding = readBinding(input.binding);
+      }
+      if (Object.hasOwn(input, "visibility")) field.visibility = readVisibility(input.visibility);
+    }
     else if (input.action === "remove") {
       next.fields.splice(index, 1);
       selected = "layout";

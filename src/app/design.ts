@@ -10,14 +10,14 @@ export const design: ScreenDesign = {
   },
   "fields": [
     {
-      "id": "field-name",
-      "kind": "name",
-      "label": "備品名"
-    },
-    {
       "id": "field-quantity",
       "kind": "quantity",
       "label": "在庫"
+    },
+    {
+      "id": "field-name",
+      "kind": "name",
+      "label": "備品名"
     },
     {
       "id": "field-minimum",

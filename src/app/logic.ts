@@ -20,6 +20,15 @@ export function needsRestock(item: Item): boolean {
   return item.quantity < item.minimumStock;
 }
 
+export function hasStock(item: Item): boolean {
+  return item.quantity > 0;
+}
+
+// デザイナーに公開する同期の表示判定関数。
+export const visibilityRules = { needsRestock, hasStock } satisfies Record<string, (item: Item) => boolean>;
+
+export type VisibilityRuleName = keyof typeof visibilityRules;
+
 function readCount(value: unknown, label: string): number {
   if (typeof value !== "string" || !/^\d+$/.test(value.trim())) {
     throw new ValidationError(`${label}には0以上の整数を入力してください。`);

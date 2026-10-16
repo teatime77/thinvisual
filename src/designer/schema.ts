@@ -1,3 +1,5 @@
+import { visibilityRules, type Item, type VisibilityRuleName } from "../app/logic.js";
+
 export type Layout =
   | { kind: "grid"; columns: number; gap: number }
   | { kind: "flex"; direction: "row" | "column"; gap: number };
@@ -8,7 +10,13 @@ export const fieldLabels = {
 };
 
 export type FieldKind = keyof typeof fieldLabels;
-export interface CardField { id: string; kind: FieldKind; label: string }
+export interface CardField {
+  id: string;
+  kind: FieldKind;
+  label: string;
+  binding?: keyof Item;
+  visibility?: "always" | "never" | VisibilityRuleName;
+}
 export interface ScreenDesign { title: string; layout: Layout; fields: CardField[] }
 
 export class DesignError extends Error {}
@@ -36,6 +44,23 @@ export function readLabel(value: unknown): string {
 
 export function isFieldKind(value: unknown): value is FieldKind {
   return typeof value === "string" && Object.hasOwn(fieldLabels, value);
+}
+
+export function readBinding(value: unknown): keyof Item {
+  if (typeof value !== "string" || !/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(value)
+    || ["__proto__", "prototype", "constructor"].includes(value)) {
+    throw new DesignError("表示するデータのプロパティを選んでください。");
+  }
+  // 実在するプロパティと型の互換性は、ts-morphの解析結果で検証する。
+  return value as keyof Item;
+}
+
+export function readVisibility(value: unknown): NonNullable<CardField["visibility"]> {
+  if (value !== "always" && value !== "never"
+    && !(typeof value === "string" && Object.hasOwn(visibilityRules, value))) {
+    throw new DesignError("表示条件には登録済みの関数を選んでください。");
+  }
+  return value as NonNullable<CardField["visibility"]>;
 }
 
 export function validateDesign(value: unknown): ScreenDesign {
@@ -67,13 +92,17 @@ export function validateDesign(value: unknown): ScreenDesign {
   const ids = new Set<string>();
   const fields = data.fields.map((value) => {
     const field = record(value);
-    keys(field, ["id", "kind", "label"]);
+    keys(field, ["id", "kind", "label", "binding", "visibility"]);
     if (typeof field.id !== "string" || !/^field-[a-zA-Z0-9-]{1,40}$/.test(field.id) || ids.has(field.id)) {
       throw new DesignError("部品IDが不正、または重複しています。");
     }
     if (!isFieldKind(field.kind)) throw new DesignError("未対応の部品です。");
     ids.add(field.id);
-    return { id: field.id, kind: field.kind, label: readLabel(field.label) };
+    return {
+      id: field.id, kind: field.kind, label: readLabel(field.label),
+      ...(field.binding !== undefined ? { binding: readBinding(field.binding) } : {}),
+      ...(field.visibility !== undefined ? { visibility: readVisibility(field.visibility) } : {}),
+    };
   });
   return { title: readLabel(data.title), layout: validLayout, fields };
 }
