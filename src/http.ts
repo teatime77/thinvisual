@@ -3,13 +3,19 @@ import express, { type Request, type Response } from "express";
 import {
   createInventory, ItemNotFoundError, ValidationError, type ItemInput,
 } from "./app/logic.js";
-import { renderInventory, renderPage } from "./app/view.js";
+import { renderInventory, renderPage, renderWorkspace } from "./app/view.js";
+import { escapeHtml } from "./html.js";
+import { updateDesign } from "./designer/actions.js";
+import { DesignConflictError, DesignError } from "./designer/schema.js";
+import { createDesignStore, type DesignStore } from "./designer/store.js";
+import { selectionUrl } from "./designer/view.js";
 
 const require = createRequire(import.meta.url);
 const htmxPath = require.resolve("htmx.org/dist/htmx.min.js");
 
-export function createApp(inventory = createInventory()) {
+export function createApp(inventory = createInventory(), options: { designer?: boolean; designStore?: DesignStore } = {}) {
   const app = express();
+  const designStore = options.designStore ?? createDesignStore();
   app.disable("x-powered-by");
   app.use(express.urlencoded({ extended: false, limit: "8kb" }));
 
@@ -25,28 +31,65 @@ export function createApp(inventory = createInventory()) {
   });
 
   function onlyLowStock(request: Request): boolean {
-    return (request.method === "GET" ? request.query.lowStock : request.body?.lowStock) === "1";
+    return parameter(request, "lowStock") === "1";
   }
 
-  function sendInventory(request: Request, response: Response, options: {
+  function parameter(request: Request, name: string): unknown {
+    return request.method === "GET" ? request.query[name] : request.body?.[name];
+  }
+
+  function designMode(request: Request): boolean {
+    return options.designer === true && parameter(request, "designer") === "1";
+  }
+
+  function returnUrl(request: Request): string {
+    const selected = parameter(request, "selected");
+    return designMode(request) ? selectionUrl(typeof selected === "string" ? selected : "layout", onlyLowStock(request))
+      : onlyLowStock(request) ? "/?lowStock=1" : "/";
+  }
+
+  function sendInventory(request: Request, response: Response, messages: {
     error?: string; notice?: string; draft?: ItemInput;
+    designError?: string; designNotice?: string;
   } = {}) {
+    let snapshot;
+    try { snapshot = designStore.read(); }
+    catch (error) {
+      if (!(error instanceof DesignError)) throw error;
+      const partialInventory = request.get("HX-Request") === "true" && !designMode(request);
+      const tag = partialInventory ? "section" : "main";
+      const html = `<${tag} id="${partialInventory ? "inventory" : "workspace"}"><p class="error" role="alert">${escapeHtml(error.message)}</p><a href="/">再読み込み</a></${tag}>`;
+      response.status(422).set("Cache-Control", "no-store").type("html").send(request.get("HX-Request") === "true" ? html : renderPage(html));
+      return;
+    }
+    const selected = parameter(request, "selected");
+    const designer = designMode(request) ? {
+      selected: typeof selected === "string" && (selected === "title" || snapshot.design.fields.some((field) => field.id === selected)) ? selected : "layout",
+      revision: snapshot.revision,
+      onlyLowStock: onlyLowStock(request),
+      error: messages.designError,
+      notice: messages.designNotice,
+    } : undefined;
     const fragment = renderInventory({
       items: inventory.list(onlyLowStock(request)),
       total: inventory.list().length,
       onlyLowStock: onlyLowStock(request),
-      ...options,
+      error: messages.error, notice: messages.notice, draft: messages.draft,
+      design: snapshot.design, designer,
+    });
+    const workspace = renderWorkspace(fragment, snapshot.design, {
+      designerEnabled: options.designer === true, onlyLowStock: onlyLowStock(request), designer,
     });
     response.set("Cache-Control", "no-store");
     response.vary("HX-Request");
-    response.type("html").send(request.get("HX-Request") === "true" ? fragment : renderPage(fragment));
+    response.type("html").send(request.get("HX-Request") === "true" ? (designer ? workspace : fragment) : renderPage(workspace, snapshot.design.title));
   }
 
   function mutate(request: Request, response: Response, operation: () => string, draft?: ItemInput) {
     try {
       const notice = operation();
       if (request.get("HX-Request") !== "true") {
-        response.redirect(303, onlyLowStock(request) ? "/?lowStock=1" : "/");
+        response.redirect(303, returnUrl(request));
         return;
       }
       sendInventory(request, response, { notice });
@@ -59,6 +102,27 @@ export function createApp(inventory = createInventory()) {
 
   app.get("/assets/htmx.min.js", (_request, response) => response.sendFile(htmxPath));
   app.get(["/", "/items"], (request, response) => sendInventory(request, response));
+
+  if (options.designer) {
+    app.post("/designer", (request, response) => {
+      try {
+        if (!designMode(request)) throw new DesignError("デザイナーモードから操作してください。");
+        if (typeof request.body?.revision !== "string") throw new DesignConflictError("画面を再読み込みしてから保存してください。");
+        const updated = updateDesign(designStore.read().design, request.body);
+        designStore.save(updated.design, request.body.revision);
+        request.body.selected = updated.selected;
+        if (request.get("HX-Request") !== "true") {
+          response.redirect(303, returnUrl(request));
+          return;
+        }
+        sendInventory(request, response, { designNotice: "TypeScriptに保存して反映しました。" });
+      } catch (error) {
+        if (!(error instanceof DesignError)) throw error;
+        response.status(error instanceof DesignConflictError ? 409 : 400);
+        sendInventory(request, response, { designError: error.message, error: designMode(request) ? undefined : error.message });
+      }
+    });
+  }
 
   app.post("/items", (request, response) => {
     const draft = {

@@ -6,7 +6,7 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
   throw new Error("PORTには1〜65535の整数を指定してください。");
 }
 
-createApp().listen(port, "127.0.0.1", () => {
+createApp(undefined, { designer: process.argv.includes("--designer") }).listen(port, "127.0.0.1", () => {
   console.log(`ThinVisual: http://127.0.0.1:${port}`);
 }).on("error", (error: Error) => {
   console.error(error.message);

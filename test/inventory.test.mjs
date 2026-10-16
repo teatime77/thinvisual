@@ -1,31 +1,7 @@
 import assert from "node:assert/strict";
-import { once } from "node:events";
 import test from "node:test";
-import { createInventory, needsRestock } from "../dist/app/logic.js";
-import { createApp } from "../dist/http.js";
-
-async function fixture(t) {
-  const inventory = createInventory();
-  const server = createApp(inventory).listen(0, "127.0.0.1");
-  await once(server, "listening");
-  t.after(() => new Promise((resolve, reject) => {
-    server.close((error) => error ? reject(error) : resolve());
-    server.closeIdleConnections();
-  }));
-  const base = `http://127.0.0.1:${server.address().port}`;
-  return {
-    inventory,
-    async request(path, fields, headers = { "HX-Request": "true" }) {
-      const response = await fetch(`${base}${path}`, {
-        method: fields ? "POST" : "GET",
-        body: fields ? new URLSearchParams(fields) : undefined,
-        headers,
-        redirect: "manual",
-      });
-      return { status: response.status, headers: response.headers, html: await response.text() };
-    },
-  };
-}
+import { needsRestock } from "../dist/app/logic.js";
+import { fixture } from "../test-support/fixture.mjs";
 
 test("初期画面・HTML断片・htmxを配信し、不足品を絞り込める", async (t) => {
   const { request } = await fixture(t);
